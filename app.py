@@ -361,9 +361,11 @@ with st.sidebar:
 
     def setting(name, default=""):
         try:
-            return str(st.secrets.get(name, os.environ.get(name, default))).strip()
-        except FileNotFoundError:
-            return os.environ.get(name, default).strip()
+            if name in st.secrets:
+                return str(st.secrets[name]).strip()
+        except Exception:
+            pass
+        return str(os.environ.get(name, default)).strip()
 
     backend = setting("OLLAMA_BACKEND", "cloud").lower()
     if backend == "local":
