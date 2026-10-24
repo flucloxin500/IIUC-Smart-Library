@@ -20,18 +20,44 @@ from iiuc_library_data import (
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL_NAME = "gemma4:e2b"
+CLOUD_OLLAMA_URL = "https://ollama.com"
+CLOUD_MODEL_NAME = "gemma4:31b"
 
 
-def check_ollama_status(base_url: str = DEFAULT_OLLAMA_URL) -> Dict[str, Any]:
+def _headers(base_url: str, api_key: str = "") -> Dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        if base_url.rstrip("/") != CLOUD_OLLAMA_URL:
+            raise ValueError("Cloud API keys can only be sent to https://ollama.com")
+        headers["Authorization"] = "Bearer " + api_key
+    elif base_url.rstrip("/") == CLOUD_OLLAMA_URL:
+        raise ValueError("Set OLLAMA_API_KEY in Streamlit Secrets before using cloud AI.")
+    return headers
+
+
+def _request_error(exc: Exception) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        return {
+            401: "Ollama authentication failed. Replace OLLAMA_API_KEY in app Secrets.",
+            403: "Ollama denied access. Check the key and account permissions.",
+            404: "Ollama model or endpoint not found. Check OLLAMA_MODEL.",
+            429: "Ollama usage limit reached. Wait and retry or check your account limits.",
+        }.get(exc.code, f"Ollama service error (HTTP {exc.code}). Please retry later.")
+    if isinstance(exc, ValueError):
+        return "Ollama configuration or response is invalid. Check the app Secrets and model settings."
+    return "Ollama could not be reached or timed out. Please retry later."
+
+
+def check_ollama_status(base_url: str = DEFAULT_OLLAMA_URL, api_key: str = "") -> Dict[str, Any]:
     """Checks if local Ollama server is running and lists installed Gemma models."""
     try:
-        req = urllib.request.Request(f"{base_url.rstrip('/')}/api/tags", method="GET")
+        req = urllib.request.Request(f"{base_url.rstrip('/')}/api/tags", headers=_headers(base_url, api_key), method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             models = [m.get("name", "") for m in data.get("models", [])]
             return {"online": True, "models": models}
     except Exception as exc:
-        return {"online": False, "models": [], "error": str(exc)}
+        return {"online": False, "models": [], "error": _request_error(exc)}
 
 
 def _call_ollama_chat(
@@ -39,6 +65,7 @@ def _call_ollama_chat(
     image_bytes: Optional[bytes] = None,
     model_name: str = DEFAULT_MODEL_NAME,
     base_url: str = DEFAULT_OLLAMA_URL,
+    api_key: str = "",
 ) -> str:
     """Calls Ollama's /api/chat endpoint with optional multimodal image input (works without extra SDK issues)."""
     msg: Dict[str, Any] = {"role": "user", "content": prompt}
@@ -56,12 +83,18 @@ def _call_ollama_chat(
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/api/chat",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=_headers(base_url, api_key),
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-        return body.get("message", {}).get("content", "")
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        content = body.get("message", {}).get("content", "")
+        if body.get("error") or not isinstance(content, str) or not content.strip():
+            raise ValueError("Empty or invalid model response")
+        return content
+    except Exception as exc:
+        raise RuntimeError(_request_error(exc)) from None
 
 
 def _extract_json_block(raw_text: str) -> Dict[str, Any]:
@@ -109,6 +142,7 @@ def identify_book_from_image(
     manual_hint: str = "",
     model_name: str = DEFAULT_MODEL_NAME,
     base_url: str = DEFAULT_OLLAMA_URL,
+    api_key: str = "",
 ) -> Dict[str, Any]:
     """Read visible book evidence; never invent an identity or shelf location."""
     raw_output = ""
@@ -140,10 +174,10 @@ Use real JSON booleans, not quoted strings. For non-book images return
 {"is_book": false, "title_readable": false, "book_title": "", "author": "", "edition": ""}.
 """
         try:
-            raw_output = _call_ollama_chat(prompt, image_bytes, model_name, base_url)
+            raw_output = _call_ollama_chat(prompt, image_bytes, model_name, base_url, api_key)
         except Exception as exc:
             raw_output = str(exc)
-            return failure("Gemma could not analyze this image. Check Ollama, the installed model tag, and image support, then retry. No book was identified.")
+            return failure(f"{exc} No book was identified.")
         parsed = _extract_json_block(raw_output)
         if not isinstance(parsed, dict) or not parsed:
             return failure("Gemma returned an unreadable response. Try again with a clear book cover. No book was identified.")
@@ -194,6 +228,7 @@ def generate_custom_course_advice(
     books: List[Dict[str, Any]],
     model_name: str = DEFAULT_MODEL_NAME,
     base_url: str = DEFAULT_OLLAMA_URL,
+    api_key: str = "",
 ) -> str:
     """
     Feature 2 AI Advisor: Generates tailored study & book-picking advice from Gemma 4 E2B
@@ -212,7 +247,7 @@ A student is currently outside the library and needs help selecting and using bo
 - Course: {course_code} - {course_title}
 - Student's specific need/topic: "{student_topic_query or 'Midterm and Final exam preparation'}"
 
-Available Books in IIUC Central Library for this course:
+Sample catalogue books for this course (demonstration locations; not verified library inventory):
 {book_list_str}
 
 Give a concise, helpful response (in both English and Bangla) with:
@@ -221,13 +256,15 @@ Give a concise, helpful response (in both English and Bangla) with:
 Keep it short, friendly, and practical for an IIUC student."""
 
     try:
-        return _call_ollama_chat(prompt=prompt, image_bytes=None, model_name=model_name, base_url=base_url)
+        return _call_ollama_chat(prompt=prompt, image_bytes=None, model_name=model_name, base_url=base_url, api_key=api_key)
     except Exception as exc:
+        if not books:
+            return "No catalogue books are available for study advice."
         first_book = books[0]
         return (
             f"**Recommended Pick:** Grab **{first_book['title']}** by *{first_book['author']}* first "
             f"(Location: **{first_book['floor_no']} → Shelf `{first_book['shelf_no']}` → Row `{first_book['row_no']}` → Column `{first_book['col_no']}`**).\\n\\n"
             f"- **English Study Tip:** {first_book['exam_tip_en']}\\n"
             f"- **বাংলা পরামর্শ:** {first_book['exam_tip_bn']}\\n\\n"
-            f"*(Note: Local Ollama server `{base_url}` was unreachable ({exc}), showing verified IIUC syllabus guidance.)*"
+            f"*(Note: AI advice unavailable ({exc}), showing sample catalogue study tips, not AI-generated advice.)*"
         )

@@ -1,14 +1,15 @@
 """
 IIUC Smart Library Book Tagger & Exact Shelf Locator
-Powered by Open-Source Gemma 4 E2B (via Ollama)
+Powered by Open-Source Gemma 4 (via Ollama)
 
 Top 2 Core Features:
-1. Visual Book Scanner & Identifier: Capture or upload an image of ANY book -> Gemma 4 E2B identifies the book,
+1. Visual Book Scanner & Identifier: Capture or upload an image of ANY book -> Gemma 4 identifies the book,
    tags its IIUC Department, Semester & Course, and shows its exact Floor, Shelf, Row, and Column.
 2. Remote Course Book Finder & Shelf Locator: A student outside the library selects Department -> Semester -> Course
    and gets required textbooks + exact Floor No, Shelf No, Row No, and Column No with an interactive 2D Shelf Grid.
 """
 
+import os
 import hashlib
 import streamlit as st
 
@@ -19,6 +20,8 @@ from iiuc_library_data import (
     get_all_books_flat,
 )
 from gemma_engine import (
+    CLOUD_OLLAMA_URL,
+    CLOUD_MODEL_NAME,
     DEFAULT_MODEL_NAME,
     DEFAULT_OLLAMA_URL,
     check_ollama_status,
@@ -356,17 +359,35 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    with st.expander("⚙️ Model Settings & Server URL", expanded=True):
-        ollama_url = st.text_input("Ollama Server URL", value=DEFAULT_OLLAMA_URL)
-        model_name = st.text_input("Ollama Model Tag", value=DEFAULT_MODEL_NAME)
+    def setting(name, default=""):
+        try:
+            return str(st.secrets.get(name, os.environ.get(name, default))).strip()
+        except FileNotFoundError:
+            return os.environ.get(name, default).strip()
 
-        status = check_ollama_status(ollama_url)
-        if status["online"]:
-            st.success(f"🟢 Ollama Connected ({len(status['models'])} models)")
-            if status["models"]:
-                st.caption("Installed: " + ", ".join(status["models"][:5]))
-        else:
-            st.warning("Ollama is unavailable. Image recognition needs a working model connection; manual catalogue search remains available.")
+    backend = setting("OLLAMA_BACKEND", "cloud").lower()
+    if backend == "local":
+        ollama_url = setting("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL)
+        model_name = setting("OLLAMA_MODEL", DEFAULT_MODEL_NAME)
+        api_key = ""
+    else:
+        ollama_url = CLOUD_OLLAMA_URL
+        model_name = setting("OLLAMA_MODEL", CLOUD_MODEL_NAME)
+        api_key = setting("OLLAMA_API_KEY")
+
+    with st.expander("⚙️ AI connection", expanded=True):
+        st.caption(f"Ollama {'Local' if backend == 'local' else 'Cloud'} · {model_name}")
+        if backend != "local" and not api_key:
+            st.warning("Cloud AI needs OLLAMA_API_KEY in app Secrets. Manual catalogue search remains available.")
+        elif st.button("Check AI connection"):
+            status = check_ollama_status(ollama_url, api_key=api_key)
+            if status["online"]:
+                st.success("Ollama API reachable. Image inference is checked when you scan.")
+                if model_name not in status["models"]:
+                    st.warning("Configured model was not listed. Check OLLAMA_MODEL in app Secrets.")
+            else:
+                st.warning(status["error"])
+        st.caption("Uploaded scans are sent to the configured AI service when you click Analyze.")
 
     with st.expander("🏛️ Library Coverage & Info", expanded=False):
         st.info(
@@ -380,7 +401,7 @@ st.markdown(
     """
     <div class="main-banner">
         <h1>📚 IIUC Smart Library Book Tagger & Exact Shelf Locator</h1>
-        <p>Powered by Open-Source <b>Gemma 4 E2B (Multimodal AI)</b> • Snap any book to identify it, or find course books remotely with exact <b>Floor, Shelf, Row & Column</b> coordinates.</p>
+        <p>Powered by Open-Source <b>Gemma 4 (Multimodal AI)</b> • Snap any book to identify it, or find course books remotely with exact <b>Floor, Shelf, Row & Column</b> coordinates.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -403,7 +424,7 @@ with tab_scanner:
     st.subheader("📸 Capture or Upload Any Book Cover / Page")
     st.write(
         "Take a photo of **any book** using your webcam/phone or upload an image. "
-        "**Gemma 4 E2B** reads the cover, identifies the book, matches it to the right **IIUC Department, Semester & Course**, "
+        "**Gemma 4** reads the cover, identifies the book, matches it to the right **IIUC Department, Semester & Course**, "
         "and gives you its exact **Floor No, Shelf No, Row No, and Column No**."
     )
 
@@ -438,7 +459,7 @@ with tab_scanner:
             placeholder="e.g., Introduction to Algorithms CLRS or Digital Logic Morris Mano",
         )
 
-        analyze_btn = st.button("🔍 Identify Book & Locate Shelf with Gemma 4 E2B", type="primary", use_container_width=True)
+        analyze_btn = st.button("🔍 Identify Book & Locate Shelf with Gemma 4", type="primary", use_container_width=True)
 
     scan_key = hashlib.sha256(
         (image_bytes_to_analyze or b"")
@@ -453,12 +474,13 @@ with tab_scanner:
             if not image_bytes_to_analyze and not manual_hint.strip():
                 st.error("Please upload/capture a book image or enter a title/topic hint first.")
             else:
-                with st.spinner("Gemma 4 E2B is reading the book image and mapping to IIUC Library coordinates..."):
+                with st.spinner("Gemma 4 is reading the book image and mapping to IIUC Library coordinates..."):
                     result = identify_book_from_image(
                         image_bytes=image_bytes_to_analyze,
                         manual_hint=manual_hint,
                         model_name=model_name,
                         base_url=ollama_url,
+                        api_key=api_key,
                     )
                     st.session_state["last_scan_result"] = result
 
@@ -509,7 +531,7 @@ with tab_scanner:
                     unsafe_allow_html=True,
                 )
     
-                st.markdown("#### 🧠 Gemma 4 E2B Syllabus & Exam Guide")
+                st.markdown("#### 🧠 Gemma 4 Syllabus & Exam Guide")
                 st.info(
                     f"**🇬🇧 English Study Tip:** {res['exam_tip_en']}\n\n"
                     f"**🇧🇩 বাংলা পরামর্শ:** {res['exam_tip_bn']}"
@@ -518,7 +540,7 @@ with tab_scanner:
                 if res.get("detected_topics"):
                     st.write("**Key Covered Topics:** " + " • ".join([f"`{t}`" for t in res["detected_topics"]]))
     
-                with st.expander("🔧 View Raw Gemma 4 E2B Model Output"):
+                with st.expander("🔧 View Raw Gemma 4 Model Output"):
                     st.code(res.get("raw_model_response") or "Matched via IIUC Catalog Engine", language="json")
         else:
             st.info("👈 Upload or capture a book image on the left and click **Identify Book & Locate Shelf** to see the full breakdown.")
@@ -622,8 +644,8 @@ with tab_finder:
                     unsafe_allow_html=True,
                 )
 
-    # Interactive Gemma 4 E2B Course Advisor Box
-    st.markdown("#### 🤖 Ask Gemma 4 E2B for Custom Topic / Exam Advice on This Course")
+    # Interactive Gemma 4 Course Advisor Box
+    st.markdown("#### 🤖 Ask Gemma 4 for Custom Topic / Exam Advice on This Course")
     q_col1, q_col2 = st.columns([3, 1])
     with q_col1:
         student_topic = st.text_input(
@@ -632,10 +654,10 @@ with tab_finder:
         )
     with q_col2:
         st.markdown("<div class='ask-btn-spacer'></div>", unsafe_allow_html=True)
-        ask_gemma_btn = st.button("✨ Ask Gemma 4 E2B", use_container_width=True)
+        ask_gemma_btn = st.button("✨ Ask Gemma 4", use_container_width=True)
 
     if ask_gemma_btn:
-        with st.spinner("Gemma 4 E2B is preparing your personalized IIUC study & book pickup plan..."):
+        with st.spinner("Gemma 4 is preparing your personalized IIUC study & book pickup plan..."):
             advice = generate_custom_course_advice(
                 dept_label=selected_dept_label,
                 semester=selected_semester,
@@ -645,6 +667,7 @@ with tab_finder:
                 books=course_books,
                 model_name=model_name,
                 base_url=ollama_url,
+                        api_key=api_key,
             )
-            st.success("🎓 **Gemma 4 E2B Study & Library Pickup Plan:**")
+            st.success("🎓 **Gemma 4 Study & Library Pickup Plan:**")
             st.markdown(advice)
