@@ -9,9 +9,7 @@ Top 2 Core Features:
    and gets required textbooks + exact Floor No, Shelf No, Row No, and Column No with an interactive 2D Shelf Grid.
 """
 
-import io
 import hashlib
-from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
 
 from iiuc_library_data import (
@@ -32,90 +30,270 @@ st.set_page_config(
     page_title="IIUC Smart Library Book Tagger & Locator",
     page_icon="📚",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# Custom CSS for clean badges, location cards, and visual shelf matrix
+# Custom CSS for full multi-device responsiveness, clean badges, location cards, and visual shelf matrix
 st.markdown(
     """
     <style>
+    /* Viewport & base responsiveness */
+    html, body, [data-testid="stAppViewContainer"] {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    /* Fluid page container padding */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 3.5rem !important;
+        padding-left: clamp(0.75rem, 3vw, 3rem) !important;
+        padding-right: clamp(0.75rem, 3vw, 3rem) !important;
+        max-width: 1300px;
+    }
+
+    /* Prevent text elements from overflowing */
+    h1, h2, h3, h4, h5, h6, p, span, div {
+        overflow-wrap: break-word;
+        word-wrap: break-word;
+    }
+
+    /* Hero Banner */
     .main-banner {
         background: linear-gradient(135deg, #0f5132 0%, #198754 100%);
         color: white;
-        padding: 1.4rem 1.8rem;
+        padding: clamp(1rem, 2.5vw, 1.6rem) clamp(1rem, 3vw, 1.8rem);
         border-radius: 14px;
         margin-bottom: 1.2rem;
         box-shadow: 0 4px 14px rgba(15, 81, 50, 0.18);
     }
     .main-banner h1 {
         margin: 0;
-        font-size: 1.85rem;
+        font-size: clamp(1.2rem, 3vw, 1.85rem);
         font-weight: 800;
         color: #ffffff;
+        line-height: 1.25;
     }
     .main-banner p {
-        margin: 0.35rem 0 0 0;
-        font-size: 1rem;
+        margin: 0.4rem 0 0 0;
+        font-size: clamp(0.85rem, 1.8vw, 1rem);
         opacity: 0.94;
+        line-height: 1.45;
+    }
+
+    /* Responsive 4-Box Coordinate Grid */
+    .coord-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin: 0.75rem 0;
+        width: 100%;
     }
     .coord-box {
         background: #f8fafc;
         border: 2px solid #198754;
         border-radius: 12px;
-        padding: 0.9rem 0.6rem;
+        padding: 0.8rem 0.5rem;
         text-align: center;
         box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 78px;
     }
     .coord-label {
-        font-size: 0.78rem;
+        font-size: clamp(0.68rem, 1.4vw, 0.78rem);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.04em;
         color: #475569;
         font-weight: 700;
+        line-height: 1.2;
     }
     .coord-value {
-        font-size: 1.3rem;
+        font-size: clamp(1.05rem, 2.2vw, 1.3rem);
         font-weight: 800;
         color: #0f5132;
-        margin-top: 0.2rem;
+        margin-top: 0.25rem;
+        line-height: 1.2;
+    }
+
+    /* Tag Pills with flex container */
+    .tag-pill-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0.4rem 0 0.6rem 0;
     }
     .tag-pill {
-        display: inline-block;
-        padding: 0.28rem 0.75rem;
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.65rem;
         border-radius: 999px;
-        font-size: 0.84rem;
+        font-size: clamp(0.72rem, 1.5vw, 0.84rem);
         font-weight: 700;
-        margin-right: 0.4rem;
-        margin-bottom: 0.4rem;
+        line-height: 1.3;
     }
     .pill-dept { background: #dcfce7; color: #166534; }
     .pill-sem  { background: #dbeafe; color: #1e40af; }
     .pill-crs  { background: #fef3c7; color: #92400e; }
     .pill-role { background: #f3e8ff; color: #6b21a8; }
+
+    /* Department Summary Strip */
+    .dept-summary-banner {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.2rem;
+        background: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 0.7rem 1rem;
+        margin: 0.8rem 0 1.2rem 0;
+        align-items: center;
+    }
+    .dept-summary-item {
+        font-size: clamp(0.82rem, 1.8vw, 0.92rem);
+        color: #334155;
+    }
+
+    /* Visual Shelf Grid Card */
+    .shelf-grid-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: clamp(8px, 2vw, 14px);
+        margin-top: 0.5rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        width: 100%;
+    }
+    .shelf-grid-title {
+        font-weight: 700;
+        font-size: clamp(0.78rem, 1.8vw, 0.9rem);
+        color: #1e293b;
+        margin-bottom: 6px;
+        line-height: 1.3;
+    }
+    .shelf-grid-scroll-wrap {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+    }
     .shelf-grid-table {
         width: 100%;
+        min-width: 280px;
         border-collapse: separate;
-        border-spacing: 6px;
-        margin-top: 0.5rem;
+        border-spacing: 5px;
     }
     .shelf-cell {
         border: 1px solid #cbd5e1;
         border-radius: 6px;
-        padding: 8px 4px;
+        padding: 6px 3px;
         text-align: center;
-        font-size: 0.75rem;
+        font-size: clamp(0.66rem, 1.4vw, 0.75rem);
         background: #f1f5f9;
         color: #64748b;
+        white-space: nowrap;
     }
     .shelf-cell-active {
         border: 2px solid #15803d;
         border-radius: 6px;
-        padding: 8px 4px;
+        padding: 6px 3px;
         text-align: center;
-        font-size: 0.8rem;
+        font-size: clamp(0.7rem, 1.5vw, 0.8rem);
         font-weight: 800;
         background: #22c55e;
         color: #ffffff;
         box-shadow: 0 0 10px rgba(34, 197, 94, 0.55);
+        white-space: nowrap;
+    }
+
+    /* Ask Gemma button spacing container */
+    .ask-btn-spacer {
+        height: 1.75rem;
+    }
+
+    /* Responsive Tabs */
+    div[data-baseweb="tab-list"] {
+        gap: 6px !important;
+        overflow-x: auto !important;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+        border-bottom: 2px solid #e2e8f0;
+        padding-bottom: 4px;
+    }
+    div[data-baseweb="tab"] {
+        padding: 8px 12px !important;
+        font-size: clamp(0.8rem, 1.8vw, 0.92rem) !important;
+        font-weight: 600 !important;
+        white-space: normal !important;
+        text-align: center !important;
+    }
+
+    /* Touch Targets & Buttons */
+    div[data-testid="stButton"] button {
+        min-height: 42px;
+        font-size: clamp(0.85rem, 1.8vw, 0.95rem) !important;
+        border-radius: 8px !important;
+    }
+
+    /* Breakpoint: Tablets & below (<= 900px) */
+    @media (max-width: 900px) {
+        .coord-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+    }
+
+    /* Breakpoint: Mobile screens (<= 768px) */
+    @media (max-width: 768px) {
+        /* Stack multi-column horizontal blocks vertically */
+        div[data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+            gap: 0.9rem !important;
+        }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* Hide desktop spacer on mobile */
+        .ask-btn-spacer {
+            display: none !important;
+            height: 0 !important;
+        }
+
+        /* Full width touch-friendly controls */
+        div[data-testid="stSelectbox"], 
+        div[data-testid="stTextInput"],
+        div[data-testid="stRadio"],
+        div[data-testid="stFileUploader"] {
+            width: 100% !important;
+        }
+    }
+
+    /* Breakpoint: Small Mobile Phones (<= 480px) */
+    @media (max-width: 480px) {
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 2rem !important;
+            padding-left: 0.6rem !important;
+            padding-right: 0.6rem !important;
+        }
+        .coord-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        .coord-box {
+            padding: 0.55rem 0.35rem;
+            min-height: 68px;
+        }
+        .shelf-grid-table {
+            border-spacing: 3px;
+        }
+        .shelf-cell, .shelf-cell-active {
+            padding: 5px 2px;
+        }
     }
     </style>
     """,
@@ -124,11 +302,12 @@ st.markdown(
 
 
 def render_shelf_grid_html(shelf_no: str, target_row: int, target_col: int, total_rows: int = 5, total_cols: int = 6) -> str:
-    """Renders a visual 2D bookshelf matrix highlighting the exact Row and Column slot."""
+    """Renders a responsive visual 2D bookshelf matrix highlighting the exact Row and Column slot."""
     html = [
-        f"<div style='background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:12px;'>",
-        f"<div style='font-weight:700; font-size:0.9rem; color:#1e293b; margin-bottom:4px;'>"
+        f"<div class='shelf-grid-card'>",
+        f"<div class='shelf-grid-title'>"
         f"🗄️ Visual Rack Map — Shelf <code>{shelf_no}</code> (Row {target_row}, Col {target_col})</div>",
+        "<div class='shelf-grid-scroll-wrap'>",
         "<table class='shelf-grid-table'>",
     ]
     for r in range(1, total_rows + 1):
@@ -139,100 +318,62 @@ def render_shelf_grid_html(shelf_no: str, target_row: int, target_col: int, tota
             else:
                 html.append(f"<td class='shelf-cell'>R{r}•C{c}</td>")
         html.append("</tr>")
-    html.append("</table></div>")
+    html.append("</table></div></div>")
     return "".join(html)
 
 
 def render_location_coordinates(floor_no: str, shelf_no: str, row_no: int, col_no: int, zone: str = ""):
-    """Renders the 4-box physical coordinate bar (Floor No, Shelf No, Row No, Column No)."""
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(
-            f"<div class='coord-box'><div class='coord-label'>🏢 Floor No</div>"
-            f"<div class='coord-value'>{floor_no}</div></div>",
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            f"<div class='coord-box'><div class='coord-label'>🗄️ Shelf No</div>"
-            f"<div class='coord-value'>{shelf_no}</div></div>",
-            unsafe_allow_html=True,
-        )
-    with c3:
-        st.markdown(
-            f"<div class='coord-box'><div class='coord-label'>📏 Row No (Top→Down)</div>"
-            f"<div class='coord-value'>Row {row_no}</div></div>",
-            unsafe_allow_html=True,
-        )
-    with c4:
-        st.markdown(
-            f"<div class='coord-box'><div class='coord-label'>📍 Column No (Left→Right)</div>"
-            f"<div class='coord-value'>Col {col_no}</div></div>",
-            unsafe_allow_html=True,
-        )
+    """Renders the physical coordinate bar using a responsive 4-box CSS Grid (auto wraps 2x2 on mobile)."""
+    grid_html = (
+        f"<div class='coord-grid'>"
+        f"<div class='coord-box'><div class='coord-label'>🏢 Floor No</div>"
+        f"<div class='coord-value'>{floor_no}</div></div>"
+        f"<div class='coord-box'><div class='coord-label'>🗄️ Shelf No</div>"
+        f"<div class='coord-value'>{shelf_no}</div></div>"
+        f"<div class='coord-box'><div class='coord-label'>📏 Row No (Top→Down)</div>"
+        f"<div class='coord-value'>Row {row_no}</div></div>"
+        f"<div class='coord-box'><div class='coord-label'>📍 Col No (Left→Right)</div>"
+        f"<div class='coord-value'>Col {col_no}</div></div>"
+        f"</div>"
+    )
+    st.markdown(grid_html, unsafe_allow_html=True)
     if zone:
         st.caption(f"🧭 **Library Zone:** {zone} • **Call Tag:** `IIUC-{shelf_no}-R{row_no}C{col_no}`")
 
 
-def generate_demo_book_cover(title: str, author: str, course_code: str, dept_code: str) -> bytes:
-    """Generates a clean synthetic book cover image in memory for instant 1-click judge testing."""
-    img = Image.new("RGB", (480, 640), color=(15, 81, 50))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([24, 24, 456, 616], outline=(255, 255, 255), width=4)
-    draw.rectangle([40, 48, 440, 130], fill=(25, 135, 84))
-
-    # Draw text lines cleanly using default PIL font
-    draw.text((60, 75), f"IIUC {dept_code} REFERENCE TEXTBOOK", fill=(255, 255, 255))
-    draw.text((60, 180), f"Course: {course_code}", fill=(187, 247, 208))
-
-    # Wrap title
-    words = title.split()
-    lines = []
-    curr = ""
-    for w in words:
-        if len(curr + " " + w) <= 28:
-            curr = (curr + " " + w).strip()
-        else:
-            lines.append(curr)
-            curr = w
-    if curr:
-        lines.append(curr)
-
-    y_pos = 240
-    for line in lines:
-        draw.text((60, y_pos), line, fill=(255, 255, 255))
-        y_pos += 32
-
-    draw.text((60, 460), f"Author: {author}", fill=(226, 232, 240))
-    draw.text((60, 540), "International Islamic University Chittagong", fill=(167, 243, 208))
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
 # Sidebar configuration
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/library-building.png", width=64)
-    st.title("⚙️ Gemma 4 E2B Settings")
-
-    ollama_url = st.text_input("Ollama Server URL", value=DEFAULT_OLLAMA_URL)
-    model_name = st.text_input("Ollama Model Tag", value=DEFAULT_MODEL_NAME)
-
-    status = check_ollama_status(ollama_url)
-    if status["online"]:
-        st.success(f"🟢 Ollama Connected ({len(status['models'])} models)")
-        if status["models"]:
-            st.caption("Installed: " + ", ".join(status["models"][:5]))
-    else:
-        st.warning("Ollama is unavailable. Image recognition needs a working model connection; manual catalogue search remains available.")
-
-    st.markdown("### 🏛️ Coverage")
-    st.info(
-        f"**16 IIUC Departments** across **6 Faculties + CGED**\n\n"
-        f"**8 Semesters** per Department\n\n"
-        f"**{len(get_all_books_flat())}+ Pre-Tagged Books** with exact **Floor, Shelf, Row & Column** coordinates."
+    st.markdown(
+        """
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:1.2rem; padding-bottom:0.8rem; border-bottom:1px solid #e2e8f0;">
+            <span style="font-size:1.6rem; line-height:1;">🏛️</span>
+            <div>
+                <h3 style="margin:0; font-size:1.15rem; font-weight:800; color:#0f5132;">IIUC Library Controls</h3>
+                <span style="font-size:0.75rem; color:#64748b;">Model Settings & Info</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+    with st.expander("⚙️ Model Settings & Server URL", expanded=True):
+        ollama_url = st.text_input("Ollama Server URL", value=DEFAULT_OLLAMA_URL)
+        model_name = st.text_input("Ollama Model Tag", value=DEFAULT_MODEL_NAME)
+
+        status = check_ollama_status(ollama_url)
+        if status["online"]:
+            st.success(f"🟢 Ollama Connected ({len(status['models'])} models)")
+            if status["models"]:
+                st.caption("Installed: " + ", ".join(status["models"][:5]))
+        else:
+            st.warning("Ollama is unavailable. Image recognition needs a working model connection; manual catalogue search remains available.")
+
+    with st.expander("🏛️ Library Coverage & Info", expanded=False):
+        st.info(
+            f"**16 IIUC Departments** across **6 Faculties + CGED**\n\n"
+            f"**8 Semesters** per Department\n\n"
+            f"**{len(get_all_books_flat())}+ Pre-Tagged Books** with exact **Floor, Shelf, Row & Column** coordinates."
+        )
 
 # Top Header
 st.markdown(
@@ -274,13 +415,11 @@ with tab_scanner:
             [
                 "📁 Upload Book Image (JPG / PNG)",
                 "📷 Live Camera Capture (Webcam / Phone)",
-                "⚡ Quick Demo Sample Books (1-Click Judge Test)",
             ],
-            horizontal=False,
+            horizontal=True,
         )
 
         image_bytes_to_analyze = None
-        sample_hint = ""
 
         if input_mode == "📁 Upload Book Image (JPG / PNG)":
             uploaded = st.file_uploader("Upload a photo of a book cover or title page", type=["png", "jpg", "jpeg", "webp"])
@@ -293,48 +432,9 @@ with tab_scanner:
             if cam_photo is not None:
                 image_bytes_to_analyze = cam_photo.read()
 
-        else:
-            sample_options = {
-                "CSE 3rd Sem — Schaum's Data Structures with C (Seymour Lipschutz)": (
-                    "Schaum's Outline of Data Structures with C",
-                    "Seymour Lipschutz",
-                    "CSE-2321",
-                    "CSE",
-                ),
-                "EEE 1st Sem — Fundamentals of Electric Circuits (Alexander & Sadiku)": (
-                    "Fundamentals of Electric Circuits (7th Edition)",
-                    "Charles K. Alexander, Matthew N.O. Sadiku",
-                    "EEE-1101",
-                    "EEE",
-                ),
-                "BBA 1st Sem — Accounting Principles (Weygandt, Kimmel & Kieso)": (
-                    "Accounting Principles (14th Edition)",
-                    "Jerry J. Weygandt, Paul D. Kimmel, Donald E. Kieso",
-                    "ACT-1101",
-                    "BBA",
-                ),
-                "LAW 3rd Sem — The Constitution of Bangladesh (Mahmudul Islam)": (
-                    "The Constitution of the People's Republic of Bangladesh",
-                    "Mahmudul Islam",
-                    "LAW-2301",
-                    "LAW",
-                ),
-                "QSIS 1st Sem — Mabahith fi Ulum al-Qur'an (Manna al-Qattan)": (
-                    "Mabahith fi Ulum al-Qur'an",
-                    "Manna al-Qattan",
-                    "QSI-1101",
-                    "QSIS",
-                ),
-            }
-            chosen_sample = st.selectbox("Select a Sample Book Cover for Instant Demo:", list(sample_options.keys()))
-            s_title, s_author, s_crs, s_dept = sample_options[chosen_sample]
-            sample_hint = ""  # Let Gemma read the sample image without supplying its answer.
-            image_bytes_to_analyze = generate_demo_book_cover(s_title, s_author, s_crs, s_dept)
-            st.image(image_bytes_to_analyze, caption=f"Sample Book Cover: {s_title}", width=280)
-
         manual_hint = st.text_input(
             "Optional Text Hint (or type book title/topic if testing without a photo):",
-            value=sample_hint,
+            value="",
             placeholder="e.g., Introduction to Algorithms CLRS or Digital Logic Morris Mano",
         )
 
@@ -382,9 +482,11 @@ with tab_scanner:
     
                 # Academic Tag Pills
                 st.markdown(
+                    f"<div class='tag-pill-container'>"
                     f"<span class='tag-pill pill-dept'>🏛️ Dept: {res['dept_code']}</span>"
                     f"<span class='tag-pill pill-sem'>🎓 {res['semester']}</span>"
-                    f"<span class='tag-pill pill-crs'>📘 {res['course_code']}: {res['course_title']}</span>",
+                    f"<span class='tag-pill pill-crs'>📘 {res['course_code']}: {res['course_title']}</span>"
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
     
@@ -467,9 +569,12 @@ with tab_finder:
 
     # Department & Floor Summary Strip
     st.markdown(
-        f"**🏛️ Faculty:** {dept_meta['faculty']}  |  "
-        f"**🏢 Allocated Library Floor:** `{dept_meta['floor_no']}` ({dept_meta['zone']})  |  "
-        f"**📚 Found `{len(course_books)}` Required/Reference Book(s) for `{selected_course['course_code']}`**"
+        f"<div class='dept-summary-banner'>"
+        f"<div class='dept-summary-item'>🏛️ <b>Faculty:</b> {dept_meta['faculty']}</div>"
+        f"<div class='dept-summary-item'>🏢 <b>Allocated Floor:</b> <code>{dept_meta['floor_no']}</code> ({dept_meta['zone']})</div>"
+        f"<div class='dept-summary-item'>📚 <b>Books Found:</b> <b>{len(course_books)}</b> for <code>{selected_course['course_code']}</code></div>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
     # Display Each Recommended Book with Floor, Shelf, Row, Column + Visual Rack Grid
@@ -479,9 +584,11 @@ with tab_finder:
 
             with b_left:
                 st.markdown(
+                    f"<div class='tag-pill-container'>"
                     f"<span class='tag-pill pill-role'>⭐ {book['role']}</span>"
                     f"<span class='tag-pill pill-dept'>{dept_code} • {selected_semester}</span>"
-                    f"<span class='tag-pill pill-crs'>{selected_course['course_code']}</span>",
+                    f"<span class='tag-pill pill-crs'>{selected_course['course_code']}</span>"
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
                 st.markdown(f"### {idx}. {book['title']}")
@@ -524,8 +631,7 @@ with tab_finder:
             placeholder=f"e.g., Which book has easier examples for {selected_course['course_title']} midterm?",
         )
     with q_col2:
-        st.write("")
-        st.write("")
+        st.markdown("<div class='ask-btn-spacer'></div>", unsafe_allow_html=True)
         ask_gemma_btn = st.button("✨ Ask Gemma 4 E2B", use_container_width=True)
 
     if ask_gemma_btn:
